@@ -1,15 +1,22 @@
---!strict
+local function default_job_getter(f)
+    return f
+end
+
+-- TODO: memoize already required modules ?
+local function roblox_job_getter(instructions)
+    return require(instructions.Module)[instructions.Name]
+end
 
 local function root() end
 
-local function visit(schedule: Schedule, visited: { [Job]: true }, job: Job)
+local function visit(schedule, visited, job)
 	if visited[job] then
 		return
 	end
 
 	visited[job] = true
 
-	for _, dependency in schedule.graph[job] do
+	for _, dependency in ipairs(schedule.graph[job] or {}) do
 		visit(schedule, visited, dependency)
 	end
 
@@ -18,147 +25,122 @@ local function visit(schedule: Schedule, visited: { [Job]: true }, job: Job)
 	end
 end
 
-local function topologicalSort(schedule: Schedule)
+local function topologicalSort(schedule)
 	local visited = {}
-	table.clear(schedule.jobs)
+	schedule.jobs = {}
 
 	visit(schedule, visited, root)
 end
 
---[=[
-	@class Sandwich
+local coroutine_wrap = coroutine.wrap
 
-	The simple task scheduler for Roblox.
-]=]
+local function rbx_disributer(instructions_list, ...)
+    local next_actor = next(actors)
+
+    next_actor:SendMessage(instructions_list, ...)
+end
+
 local Sandwich = {}
 
---[=[
-	@within Sandwich
-	@return Schedule
+Sandwich.Distributer = function (instructions, ...)
+    coroutine_wrap(instructions)(...)
+end
 
-	Creates a new schedule that can be used to create jobs. Optionally takes in a `before` and `after` callback that will be called before and after each job is executed.
-]=]
-function Sandwich.schedule(parameters: {
-	before: (Job, ...any) -> ()?,
-	after: (Job, ...any) -> ()?,
-}?)
-	--[=[
-		@class Schedule
-
-		Schedules are used to create jobs that can be executed at a later time.
-	]=]
+function Sandwich.schedule()
 	local schedule = {
-		graph = { [root] = {} } :: { [Job]: { Job } },
-		jobs = {} :: { Job },
-		before = parameters and parameters.before,
-		after = parameters and parameters.after,
+        job_dependencies = {},
+		jobs = {},
 	}
 
-	--[=[
-		@within Schedule
+	function schedule.job(job_instructions, ...)
+		schedule.job_dependencies[job_instructions] = {...}
+        table.insert(schedule.jobs, job_instructions)
 
-		Creates a new job that can be executed later by calling `Schedule.start`. Takes in other jobs as dependencies, which must be executed before this job is executed.
-
-		```lua
-		local schedule = Sandwich.schedule()
-
-		local a = schedule.job(function(...) print("a", ...) end)
-		local b = schedule.job(function(...) print("b", ...) end)
-		local c = schedule.job(function(...) print("c", ...) end, a)
-		local d = schedule.job(function(...) print("d", ...) end, a, b)
-		local e = schedule.job(function(...) print("e", ...) end, c, d)
-		local f = schedule.job(function(...) print("f", ...) end, a, e, b, c)
-		```
-	]=]
-	function schedule.job(jobTask: (...any) -> (), ...: Job)
-		local job = jobTask
-		schedule.graph[job] = {}
-
-		local dependencies = { ... }
-		if #dependencies == 0 then
-			table.insert(schedule.graph[root], job)
-		else
-			for _, dependency in dependencies do
-				local nextJobs = schedule.graph[dependency]
-				assert(
-					nextJobs,
-					'A dependency does not exist! You are passing in a job that was not created by this schedule, or you are not passing in a job at all.'
-				)
-				table.insert(nextJobs, job)
-			end
-		end
-
-		topologicalSort(schedule)
-
-		return job
+		return job_instructions
 	end
 
-	--[=[
-		@within Schedule
+    function schedule.start(...)
+        local job_dependencies = schedule.job_dependencies
 
-		Executes a schedule's tasks in topological order.
+        local _incomplete_job_threads_list = {}
+        local _incomplete_job_threads_index = {}
 
-		```lua
-		schedule.start("Hello, world!")
+        local _completed_jobs = {}
 
-		-- b	Hello, world!
-		-- a	Hello, world!
-		-- d	Hello, world!
-		-- c	Hello, world!
-		-- e	Hello, world!
-		-- f	Hello, world!
-		```
-	]=]
-	function schedule.start(...: any)
-		for _, job in schedule.jobs do
-			local before = schedule.before
-			if before then
-				before(job, ...)
-			end
+        -- local before = schedule.before
+        -- local after = schedule.after
 
-			job(...)
+        local function job_run(job, ...)
+            local _this_job_dependencies = job_dependencies[job]
+            local _completed_dependencies = 0
 
-			local after = schedule.after
-			if after then
-				after(job, ...)
-			end
+            local _can_proceed = _completed_dependencies == #_this_job_dependencies
+
+            while not _can_proceed do
+                _completed_dependencies = 0
+
+                for _, _o_job in ipairs(_this_job_dependencies) do
+                    if not _completed_jobs[_o_job] then break end
+
+                    _completed_dependencies = _completed_dependencies + 1
+                end
+
+
+                _can_proceed = _completed_dependencies == #_this_job_dependencies
+
+                coroutine.yield()
+            end
+
+            Sandwich.Distributer(job, ...)
+
+            local _last_job = _incomplete_job_threads_list[#_incomplete_job_threads_list]
+            _incomplete_job_threads_list[_incomplete_job_threads_index[job]] = _last_job
+            _incomplete_job_threads_list[#_incomplete_job_threads_list] = nil
+
+            _incomplete_job_threads_index[_last_job.Job] = _incomplete_job_threads_index[job]
+            _incomplete_job_threads_index[job] = nil
+
+            _completed_jobs[job] = true
+        end
+
+		for _, job in ipairs(schedule.jobs) do
+            local _thread = coroutine_wrap(job_run)
+
+            table.insert(_incomplete_job_threads_list, {
+                Thread = _thread,
+                Job = job
+            })
+
+            _incomplete_job_threads_index[job] = #_incomplete_job_threads_list
+
+            _thread(job, ...)
 		end
+
+        local i;
+
+        while #_incomplete_job_threads_list > 0 do
+            i = 1
+
+            while _incomplete_job_threads_list[i] do
+                _incomplete_job_threads_list[i].Thread()
+
+                i = i + 1
+            end
+        end
 	end
 
 	return schedule
 end
 
---[=[
-	@within Sandwich
-	@return thread
-
-	Creates a new thread that will execute a callback every given number of seconds. If the callback returns a non-nil value, the thread will stop executing.
-]=]
-function Sandwich.interval<T...>(seconds: number, callback: (T...) -> boolean?, ...: T...)
-	return task.spawn(function(...: T...)
+-- TODO: Modify
+function Sandwich.interval(seconds, callback, ...)
+	return task.spawn(function(...)
 		repeat
 			task.wait(seconds)
 		until callback(...)
 	end, ...)
 end
 
-
---[=[
-	@within Schedule
-	@interface Schedule
-	.job (jobTask: (...: any) -> (), ...: Job) -> Job
-	.start (...: any) -> ()
-	.before (job: Job, ...: any) -> ()?
-	.after (job: Job, ...: any) -> ()?
-	.graph { [Job]: { Job } }
-	.jobs { Job }
-]=]
-export type Schedule = typeof(Sandwich.schedule(...))
-
---[=[
-	@within Schedule
-	@type Job (...any) -> ()
-]=]
-export type Job = typeof(Sandwich.schedule(...).job(...))
-
 return Sandwich
+
+
