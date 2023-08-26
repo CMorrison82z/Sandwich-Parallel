@@ -51,6 +51,7 @@ return function(module_script, ...)
 	local actor : Actor = actors[actorIndex]
 	actorIndex = actorIndex % actorCount + 1
 
+	-- Cannot require modules in parallel, so we must do it separately.
 	if not _actors_modules_initialized[actor][module_script] then
 		actor:SendMessage("SandwichInit", module_script)
 		actor.SandwichEnd.Event:Wait()
