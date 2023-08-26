@@ -13,6 +13,8 @@ function Sandwich.schedule()
 	}
 
 	function schedule.job(job_instructions, ...)
+		if schedule.job_dependencies[job_instructions] then error("Duplicate job entry") end
+		
 		schedule.job_dependencies[job_instructions] = { ... }
 		table.insert(schedule.jobs, job_instructions)
 
@@ -29,13 +31,15 @@ function Sandwich.schedule()
 
 		-- local before = schedule.before
 		-- local after = schedule.after
+		
+		local _start_thread = coroutine.running()
 
 		local function job_run(job, ...)
 			local _this_job_dependencies = job_dependencies[job]
 			local _completed_dependencies = 0
 
 			local _can_proceed = _completed_dependencies == #_this_job_dependencies
-
+			
 			while not _can_proceed do
 				_completed_dependencies = 0
 
@@ -48,20 +52,25 @@ function Sandwich.schedule()
 				end
 
 				_can_proceed = _completed_dependencies == #_this_job_dependencies
-
-				coroutine.yield()
+				
+				if not _can_proceed then					
+					coroutine.yield()
+				end
 			end
-
-			Sandwich.Distributer(job, ...)
-
+						
 			local _last_job = _incomplete_job_threads_list[#_incomplete_job_threads_list]
 			_incomplete_job_threads_list[_incomplete_job_threads_index[job]] = _last_job
 			_incomplete_job_threads_list[#_incomplete_job_threads_list] = nil
 
 			_incomplete_job_threads_index[_last_job.Job] = _incomplete_job_threads_index[job]
 			_incomplete_job_threads_index[job] = nil
-
+						
+			Sandwich.Distributer(job, ...)
+			
 			_completed_jobs[job] = true
+					
+			-- May need to check if the thread is running
+			coroutine.resume(_start_thread)
 		end
 
 		for _, job in ipairs(schedule.jobs) do
@@ -78,16 +87,21 @@ function Sandwich.schedule()
 		end
 
 		local i
-
+		
 		while #_incomplete_job_threads_list > 0 do
 			i = 1
 
 			while _incomplete_job_threads_list[i] do
 				_incomplete_job_threads_list[i].Thread()
-
+				
+				
 				i = i + 1
 			end
+			
+			-- We yield until a change in the job completion state (which will be resumed when a new job has completed)
+			coroutine.yield()
 		end
+		
 	end
 
 	return schedule

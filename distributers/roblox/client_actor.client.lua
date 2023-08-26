@@ -1,16 +1,15 @@
 local _cache = {}
 
-local _ended_event = script.SandwichEnd
+local _ended_event = script.Parent.SandwichEnd
 
-script.Parent:BindToMessageParallel("SandwichStart", function(module_script, ...)
-	local required_module = _cache[module_script]
+script.Parent:BindToMessage("SandwichInit", function(module_script, ...)
+	_cache[module_script] = require(module_script)
+	
+	_ended_event:Fire()
+end)
 
-	if not required_module then
-		required_module = require(module_script.Module)
-        _cache[module_script] = required_module
-	end
-
-    required_module(...)
-
-    _ended_event:Fire()
+script.Parent:BindToMessageParallel("SandwichStart", function(module_script, ...)		
+	_cache[module_script](...)
+	
+	_ended_event:Fire()
 end)
