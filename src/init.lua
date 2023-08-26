@@ -1,44 +1,4 @@
-local function default_job_getter(f)
-    return f
-end
-
--- TODO: memoize already required modules ?
-local function roblox_job_getter(instructions)
-    return require(instructions.Module)[instructions.Name]
-end
-
-local function root() end
-
-local function visit(schedule, visited, job)
-	if visited[job] then
-		return
-	end
-
-	visited[job] = true
-
-	for _, dependency in ipairs(schedule.graph[job] or {}) do
-		visit(schedule, visited, dependency)
-	end
-
-	if job ~= root then
-		table.insert(schedule.jobs, 1, job)
-	end
-end
-
-local function topologicalSort(schedule)
-	local visited = {}
-	schedule.jobs = {}
-
-	visit(schedule, visited, root)
-end
-
 local coroutine_wrap = coroutine.wrap
-
-local function rbx_disributer(instructions_list, ...)
-    local next_actor = next(actors)
-
-    next_actor:SendMessage(instructions_list, ...)
-end
 
 local Sandwich = {}
 
