@@ -11,7 +11,6 @@ local function default_job_getter(f)
 end
 
 do
-
     -- Distribute job instructions to actor
     local function rbx_disributer(instructions_list, ...)
         local next_actor = next(actors)
