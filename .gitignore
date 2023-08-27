@@ -1,4 +1,7 @@
 node_modules
+my_packages
+my_imports
 build
+
 
 selene.toml
