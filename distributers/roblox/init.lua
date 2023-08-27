@@ -1,5 +1,8 @@
 --[[
--- This implementation assumes the `job_instructions` are a module script that return a `function`
+-- This implementation assumes the `job_instructions` are a module script that return a `function`.
+--
+-- Jobs are mapped one time with one actor to reduce duplicate cached data per actor. I.e., think of each
+-- job having a dedicated actor.
 --]]
 
 -- ## SERVICES ## --
@@ -28,8 +31,6 @@ assert(not actor_script.Enabled, "Actor scripts should be disabled")
 local actors = {}
 local actorIndex = 1
 
-local _actors_modules_initialized = {}
-
 local actors_cache = Cache.new(
     DEFAULT_ACTORS,
     function ()
@@ -51,15 +52,19 @@ local actors_cache = Cache.new(
     end
 )
 
+local job_actor_map = {}
+
 return function(module_script, ...)
-	local actor : Actor = actors_cache:get()
+	local actor : Actor = job_actor_map[module_script]
 
 	-- Cannot require modules in parallel, so we must do it separately.
-	if not _actors_modules_initialized[actor][module_script] then
+	if not actor then
+        actor = actors_cache:get()
+
 		actor:SendMessage("SandwichInit", module_script)
 		actor.SandwichEnd.Event:Wait()
 
-		_actors_modules_initialized[actor][module_script] = true
+		job_actor_map[module_script] = actor
 	end
 	
 	actor:SendMessage("SandwichStart", module_script, ...)
