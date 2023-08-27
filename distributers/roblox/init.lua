@@ -69,6 +69,4 @@ return function(module_script, ...)
 	
 	actor:SendMessage("SandwichStart", module_script, ...)
 	actor.SandwichEnd.Event:Wait()
-
-    actors_cache:return_object(actor)
 end
